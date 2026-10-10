@@ -717,7 +717,7 @@ let help = {busy:false, items:null, err:null, ctl:null}, pos = 'bottom';
 try{ if(localStorage.getItem('crisisroom.pos') === 'top') pos = 'top'; }catch(e){}
 const resetHelp = () => { if(help.ctl) help.ctl.abort(); help = {busy:false, items:null, err:null, ctl:null}; };
 const saves = new Map();
-const cloud = { col:null, ready:false, busy:new Set(), dirty:new Set(), state:'local' };
+const cloud = { col:null, ready:false, busy:new Set(), dirty:new Set(), state:'local', sent:new Map(), nparts:new Map() };
 const setup = { sid:'land', dur:60, diff:'hard', lang:'th', speed:'bal', pace:'calm', side:'th', end:'auto' };
 let paused = false, autoPause = true;
 try{ autoPause = localStorage.getItem('crisisroom.autopause') !== '0'; }catch(e){}
@@ -1807,7 +1807,12 @@ function unpack(doc){
   }catch(e){ return null; }
 }
 function writeLocal(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify([...saves.values()].sort((a,b) => b.updatedAt-a.updatedAt).slice(0,6))); }catch(e){}
+  /* the browser keeps up to 6 games; when storage is full, older games drop first so the game on screen is always kept */
+  const list = [...saves.values()].sort((a,b) => (b.updatedAt||0)-(a.updatedAt||0)), cur = G ? saves.get(G.id) : null;
+  for(let n = Math.min(6, list.length); n >= 1; n--){
+    let keep = list.slice(0, n); if(cur && !keep.includes(cur)) keep = [cur].concat(keep.slice(0, n - 1));
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(keep)); return; }catch(e){}
+  }
 }
 function readLocal(){
   try{ const arr = JSON.parse(localStorage.getItem(LS_KEY)||'[]'); if(Array.isArray(arr)) arr.forEach(d => { if(d && d.v===3 && d.id) saves.set(String(d.id), d); }); }catch(e){}
@@ -1819,23 +1824,51 @@ function saveLabel(){
                                   'บันทึกไว้ในเบราว์เซอร์นี้แล้ว ออกจากหน้านี้เมื่อไร นาฬิกาจะหยุดรอ';
 }
 function paintSaveState(){ if(ui && ui.save) ui.save.textContent = saveLabel(); }
+/* the store takes at most 256 KiB per document; a long game keeps its feed in numbered part documents under the game */
+const PART_MAX = 180000;
+const enc = new TextEncoder();
+const jsonBytes = o => enc.encode(JSON.stringify(o)).length;
+const partsOf = id => cloud.col.doc(id).collection('parts');
+function splitDoc(doc){
+  if(jsonBytes(doc) <= PART_MAX) return { main:doc, parts:[] };
+  const parts = []; let cur = [], size = 0;
+  for(const f of doc.feed){ const b = jsonBytes(f) + 1; if(cur.length && size + b > PART_MAX){ parts.push(cur); cur = []; size = 0; } cur.push(f); size += b; }
+  if(cur.length) parts.push(cur);
+  return { main:Object.assign({}, doc, { feed:[], parts:parts.length }), parts };
+}
 async function pushCloud(id, retried){
   if(!cloud.ready) return;
   if(cloud.busy.has(id)){ cloud.dirty.add(id); return; }
   const doc = saves.get(id); if(!doc) return;
   cloud.busy.add(id); cloud.state = 'saving'; paintSaveState();
   let again = false;
-  try{ await cloud.col.doc(id).set(doc); cloud.state = 'saved'; }
+  try{
+    const { main, parts } = splitDoc(doc), sent = cloud.sent.get(id) || [], strs = parts.map(p => JSON.stringify(p)), had = cloud.nparts.get(id) || 0;
+    /* parts first, then the game: a reader never finds a game whose parts are missing */
+    for(let i = 0; i < parts.length; i++) if(sent[i] !== strs[i]){ await partsOf(id).doc('p' + i).set({ i, feed:parts[i] }); sent[i] = strs[i]; cloud.sent.set(id, sent); }
+    await cloud.col.doc(id).set(main);
+    for(let i = parts.length; i < had; i++) await partsOf(id).doc('p' + i).delete();
+    cloud.sent.set(id, strs); cloud.nparts.set(id, parts.length); cloud.state = 'saved';
+  }
   catch(e){
     const code = e && e.code;
     if(code==='unavailable' && !retried) again = true;
     else if(code==='quota_exceeded') cloud.state = 'full';
-    else if(code==='resource_exhausted') cloud.state = 'local';
+    else if(code==='resource_exhausted' || code==='invalid_argument') cloud.state = 'local';
     else { cloud.ready = false; cloud.state = 'local'; }
   }
   cloud.busy.delete(id); paintSaveState();
   if(again) setTimeout(() => pushCloud(id, true), 1500 + Math.random()*1500);
   else if(cloud.dirty.delete(id)) pushCloud(id);
+}
+async function loadParts(id, x){
+  const n = Number(x.parts) || 0; if(!n) return x;
+  const snap = await partsOf(id).get(), byI = [];
+  snap.docs.forEach(d => { const p = d.data(); if(p && Array.isArray(p.feed) && Number(p.i) < n) byI[Number(p.i)] = p.feed; });
+  for(let i = 0; i < n; i++) if(!byI[i]) return null;
+  const c = Object.assign({}, x, { feed:[].concat(...byI) }); delete c.parts;
+  cloud.sent.set(id, byI.map(p => JSON.stringify(p)));
+  return c;
 }
 function persist(toCloud){
   if(!G || G.phase==='opening') return;
@@ -1843,8 +1876,11 @@ function persist(toCloud){
   if(toCloud) pushCloud(doc.id);
 }
 function removeGame(id){
-  saves.delete(id); writeLocal();
-  if(cloud.ready){ try{ cloud.col.doc(id).delete().catch(() => {}); }catch(e){} }
+  saves.delete(id); writeLocal(); cloud.sent.delete(id); cloud.nparts.delete(id);
+  if(cloud.ready){
+    try{ cloud.col.doc(id).delete().catch(() => {}); }catch(e){}
+    try{ partsOf(id).get().then(s => s.docs.forEach(d => partsOf(id).doc(d.id).delete().catch(() => {}))).catch(() => {}); }catch(e){}
+  }
 }
 async function initCloud(){
   if(!hasClaude) return;
@@ -1859,8 +1895,13 @@ async function initCloud(){
   }catch(e){ return; }
   cloud.ready = true; cloud.state = 'saved';
   const remote = new Map();
-  snap.docs.forEach(d => { const x = d.data(); if(x && x.v===3){ const c = JSON.parse(JSON.stringify(x)); c.id = d.id; remote.set(d.id, c); } });
-  remote.forEach((x,id) => { if(G && G.id===id) return; const mine = saves.get(id); if(!mine || (x.updatedAt||0) > (mine.updatedAt||0)) saves.set(id, x); });
+  snap.docs.forEach(d => { const x = d.data(); if(x && x.v===3){ const c = JSON.parse(JSON.stringify(x)); c.id = d.id; remote.set(d.id, c); cloud.nparts.set(d.id, Number(c.parts) || 0); } });
+  for(const [id, x] of remote){
+    if(G && G.id===id) continue;
+    const mine = saves.get(id); if(mine && (x.updatedAt||0) <= (mine.updatedAt||0)) continue;
+    let full = null; try{ full = await loadParts(id, x); }catch(e){}
+    if(full) saves.set(id, full);
+  }
   saves.forEach((x,id) => { const r = remote.get(id); if(!r || (r.updatedAt||0) < (x.updatedAt||0)) pushCloud(id); });
   writeLocal(); paintSaveState(); if(!G) render();
 }

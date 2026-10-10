@@ -202,6 +202,13 @@ details.base .facts{font-size:.84rem;line-height:1.5;margin-top:8px}
 .armsrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) 5.2rem;gap:6px;margin:6px 0}
 .armsrow input{font:inherit;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:2px;padding:.4rem .5rem;min-height:40px;width:100%;font-variant-numeric:tabular-nums}
 .deals{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.fire{display:flex;flex-direction:column;gap:6px}
+.fire-r{display:grid;grid-template-columns:minmax(8.5rem,auto) minmax(0,1fr);gap:8px;align-items:center;font-size:.84rem;line-height:1.4}
+.pick:disabled{opacity:.5;cursor:not-allowed}
+.pick:disabled:hover{border-color:var(--line);background:transparent}
+.packinfo{display:flex;flex-direction:column;gap:3px;padding:8px 10px;border:1px dashed var(--line);font-size:.86rem;line-height:1.45}
+.cond{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 4px}
+.cond span{font-size:.74rem;border:1px solid var(--warn);color:var(--ink);padding:0 .4rem}
 .deal{display:flex;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid var(--line);border-left:3px solid var(--warn);font-size:.9rem;line-height:1.45}
 .deal.agreed{border-left-color:var(--good)}
 .deal .st{font-family:var(--f-data);font-size:.7rem;letter-spacing:.08em;color:var(--ink-2)}
@@ -421,7 +428,7 @@ details.base .facts{font-size:.84rem;line-height:1.5;margin-top:8px}
   .setup-cols{grid-template-columns:1fr;grid-template-areas:"side" "brief"}
   .setup-side{position:static}
 }
-@media (max-width: 520px){ .scn-grid{grid-template-columns:1fr} }
+@media (max-width: 520px){ .scn-grid{grid-template-columns:1fr} .armsrow{grid-template-columns:minmax(0,1fr) 5.2rem} .armsrow #arms-item{grid-column:1/-1;order:-1} }
 @media (max-width: 420px){ body{font-size:16px} .wrap{padding-inline:16px} }
 @media (max-height: 520px){ .hud{position:static} }
 </style>
@@ -499,6 +506,30 @@ const ACTORS = { us:['สหรัฐ','United States'], china:['จีน','Chi
   sg:['สิงคโปร์','Singapore'], id:['อินโดนีเซีย','Indonesia'], au:['ออสเตรเลีย','Australia'], uk:['สหราชอาณาจักร','United Kingdom'], india:['อินเดีย','India'], ru:['รัสเซีย','Russia'], kr:['เกาหลีใต้','South Korea'], il:['อิสราเอล','Israel'], it:['อิตาลี','Italy'], fr:['ฝรั่งเศส','France'], se:['สวีเดน','Sweden'], tr:['ตุรกี','Türkiye'] };
 /* states a buyer can approach for arms, besides the states already involved in the war */
 const SUPK = ['us','china','ru','kr','il','it','fr','se','tr','india'];
+/* sellers whose equipment each side already operates: from these a delivery is usable on arrival, from anyone else it needs training first.
+   Thailand and Indonesia from SIPRI 2021–25 plus systems in service (Thai Gripens from Sweden, Thai frigate and trainers from South Korea, Indonesian T-50s from South Korea);
+   Vietnam from SIPRI 2016–20 (Russia 66%, Israel 19%); Cambodia, Malaysia and Myanmar from equipment in service and the UN report on Myanmar's imports. A game simplification. */
+const FAMILY = { th:['china','us','il','se','kr'], kh:['china','ru'], vn:['ru','il'], my:['us','ru','fr','uk'], id:['it','us','fr','kr'], mm:['ru','china','india'] };
+/* what a state at war can obtain in time. n units per package; lo/hi = price per unit in US$ million before the wartime premium;
+   lead = clock minutes from deal to arrival (min, max); train = extra clock minutes when the buyer does not already operate that seller's kit.
+   Combat aircraft, major warships and submarines are not here: new ones take years and second-hand ones cannot be transferred and crewed within a war. */
+const PACKS = {
+  shell:{ th:'กระสุนปืนใหญ่และจรวด 10,000 นัด', n:5, lo:6, hi:20, lead:[4,16], train:8, by:'ขนทางอากาศจากคลังผู้ขาย',
+    src:'ราคาอ้างอิง: กระสุน 155 มม. แบบธรรมดา 3,000–5,000 ดอลลาร์ต่อนัด (Finabel, 2024) ผลิตในยุโรปตะวันตก 5,000 ถึงกว่า 10,000 ดอลลาร์ (Defense News, มิ.ย. 2024)' },
+  pgm:{ th:'ชุดนำวิถีระเบิดอากาศ 500 ชุด', n:5, lo:2, hi:7, lead:[4,16], train:28, by:'ขนทางอากาศ ต้องเข้ากับเครื่องบินที่มี',
+    src:'ราคาอ้างอิง: ชุด JDAM ราว 21,000–36,000 ดอลลาร์ต่อชุด (งบประมาณสหรัฐปี 2021 ตามการรวบรวมของ The War Zone)' },
+  sam:{ th:'ขีปนาวุธต่อสู้อากาศยานระยะใกล้ 100 นัด', n:5, lo:6, hi:16, lead:[4,16], train:28, by:'ขนทางอากาศ ต้องใช้กับแท่นยิงที่มี', src:'ราคาเป็นค่าประมาณของเกม ไม่พบแหล่งราคาต่อนัดที่ตรวจสอบได้' },
+  tank:{ th:'รถถังมือสอง 10 คัน', n:10, lo:1, hi:5, lead:[56,112], train:28, by:'ขนทางเรือ 2–4 สัปดาห์', src:'ราคาเป็นค่าประมาณของเกม' },
+  arty:{ th:'ปืนใหญ่มือสอง 12 กระบอก', n:12, lo:.5, hi:3, lead:[28,84], train:28, by:'ขนทางเรือหรือเครื่องบินขนส่ง', src:'ราคาเป็นค่าประมาณของเกม' },
+  mlrs:{ th:'จรวดหลายลำกล้องมือสอง 6 ระบบ', n:6, lo:1, hi:5, lead:[28,84], train:28, by:'ขนทางเรือหรือเครื่องบินขนส่ง', src:'ราคาเป็นค่าประมาณของเกม' },
+  patrol:{ th:'เรือตรวจการณ์มือสอง 2 ลำ', n:2, lo:5, hi:30, lead:[28,112], train:28, by:'เดินเรือมาเอง', src:'ราคาเป็นค่าประมาณของเกม' },
+  heli:{ th:'เฮลิคอปเตอร์โจมตีมือสอง 4 ลำ', n:4, lo:5, hi:20, lead:[28,84], train:56, by:'ขนด้วยเครื่องบินขนส่ง นักบินต้องฝึก', src:'ราคาเป็นค่าประมาณของเกม' }
+};
+const NOBUY = { fighter:'เครื่องบินรบ', ship:'เรือรบหลัก', sub:'เรือดำน้ำ' };
+const familiar = (code, sup) => (FAMILY[code] || []).includes(sup);
+/* conditions an outside state attaches to its help, and what the page can see break them */
+const AIDC = { no_civ:'ห้ามโจมตีเป้าหมายพลเรือน', no_capital:'ห้ามโจมตีเมืองหลวง', defensive:'ใช้เพื่อป้องกันเท่านั้น ห้ามรุกเข้าดินแดนอีกฝ่าย', no_resale:'ห้ามส่งต่อ' };
+const CAPITAL = { bkk:1, pnh:1, v_bkk:1, m_kl:1 };
 const ALLYW = ['เป็นกลางหรือเป็นคนกลาง','หนุนทางการเมือง','ส่งอาวุธ ข่าวกรอง หรือคว่ำบาตรอีกฝ่าย','ส่งกำลังร่วมรบ'];
 const ALLYS = ['เป็นกลาง','การเมือง','อาวุธ/ข่าวกรอง','ร่วมรบ'];
 const RULES_KH = `THEATRE AND ACTORS: THAILAND AND CAMBODIA.
@@ -877,7 +908,7 @@ function story(g){
     else if(f.k==='inj') L.push(`[${T}|${f.d}|${f.ch}|${f.rel}] ${f.title}${old ? '' : ' — ' + f.body}${f.ask ? ` {DECISION ${f.id}: ${f.ask}}` : ''}`);
     else if(f.k==='order') L.push(`[${T}] PLAYER ORDER: ${(old ? f.text.slice(0,300) : f.text).replace(/\n/g,' / ')}`);
     else if(f.k==='fight'){ if(!old) L.push(`[${T}] MAP: ${f.text}`); }
-    else if(f.k==='deliv') L.push(`[${T}] ARMS DELIVERED to the player's side: ${f.deal.id} from ${f.deal.sup}, ${f.deal.key} n=${f.deal.n}`);
+    else if(f.k==='deliv') L.push(`[${T}] ARMS DELIVERED to the player's side: ${f.deal.id} from ${f.deal.sup}, ${f.deal.key} n=${f.deal.n}${f.ready != null ? ', unfamiliar kit: counts after training at T+' + f.ready.toFixed(1) : ''}`);
     else if(f.k==='verdict' && old) L.push(`[${T}] OUTCOME: ${String(f.result).replace(/\n/g,' ').slice(0,220)}${(f.battles && f.battles.length) ? ' | BATTLES: ' + f.battles.map(b => `${b.dom} ${b.res}${b.loc ? ' @'+b.loc : ''}`).join('; ') : ''}`);
     else if(f.k==='verdict') L.push(`[${T}] OUTCOME: ${String(f.result).replace(/\n/g,' ')}${(f.battles && f.battles.length) ? ' | BATTLES: ' + f.battles.map(b => `${b.dom} ${b.res}${b.loc ? ' @'+b.loc : ''}: ${b.text}`).join('; ') : ''}${(f.eff && f.eff.length) ? ' | EFFECTS: ' + f.eff.map(e => `${e.side}.${e.dim} ${e.delta>0?'+':''}${e.delta}${e.loc ? ' @'+e.loc : ''}: ${e.text}`).join('; ') : ''}`);
     else if(f.k==='miss') L.push(`[${T}] DECISION ${f.id} EXPIRED WITH NO ORDER: ${f.miss}`);
@@ -1093,19 +1124,35 @@ function applyLoss(g, loss, use){
 }
 /* accepts one {"who","level","note"} object per line, or a single {"us":1,...} map */
 function parseCoalition(sec){
-  const lv = {}, notes = {};
+  const lv = {}, notes = {}, cond = {}, breach = [];
   for(const o of jsonLines(sec)){
-    if(o.who != null){ const k = String(o.who), v = Math.round(Number(o.level)); if(ACTORS[k] && isFinite(v) && o.level != null){ lv[k] = clamp(v,-3,3); const n = String(o.note || '').trim().slice(0,260); if(n) notes[k] = n; } }
+    if(o.who != null){ const k = String(o.who), v = Math.round(Number(o.level)); if(ACTORS[k] && isFinite(v) && o.level != null){ lv[k] = clamp(v,-3,3); const n = String(o.note || '').trim().slice(0,260); if(n) notes[k] = n;
+      if(Array.isArray(o.cond)) cond[k] = [...new Set(o.cond.map(String).filter(c => AIDC[c]))]; if(AIDC[o.breach]) breach.push([k, String(o.breach)]); } }
     else Object.assign(lv, cleanAlly(o));
   }
   if(!Object.keys(lv).length) Object.assign(lv, cleanAlly(parseObj(sec)));
-  return { lv, notes };
+  return { lv, notes, cond, breach };
 }
 /* returns the states whose level or stated position changed */
 function applyCoalition(g, sec){
   const C = parseCoalition(sec), ans = [], ch = applyAlly(g, C.lv);
+  g.cond = g.cond || {}; Object.keys(C.cond).forEach(k => { if(k in g.ally) g.cond[k] = C.cond[k]; });
+  C.breach.forEach(([k, c]) => breachAid(g, c, null, k));
   for(const k of Object.keys(g.ally)){ const n = C.notes[k], moved = k in ch; if(n && n !== g.allyNote[k]){ g.allyNote[k] = n; ans.push({ k, level:g.ally[k], note:n, moved }); } else if(moved) ans.push({ k, level:g.ally[k], note:g.allyNote[k] || '', moved }); }
   return { ch, ans };
+}
+/* the backed side broke a condition (or several in one act): each state that set any of them steps back one level and holds its deliveries for a while */
+function breachAid(g, codes, why, only){
+  codes = [].concat(codes);
+  const S = sideOf(g), m = minute(g), hold = 8, out = [];
+  for(const k of Object.keys(g.ally || {})){
+    if(only && k !== only) continue;
+    const v = g.ally[k], forP = S.p === 'th' ? v > 0 : v < 0, hit = codes.filter(c => ((g.cond || {})[k] || []).includes(c)); if(!forP || !hit.length) continue;
+    g.ally[k] = v - Math.sign(v); out.push([k, hit]);
+    (g.deals || []).forEach(d => { if(d.sup === k && d.st === 'agreed'){ d.eta = Math.max(d.eta, m) + hold; d.note = `${ACTORS[k][0]}ระงับการส่งมอบชั่วคราว`; } });
+  }
+  out.forEach(([k, hit]) => g.feed.push({ k:'note', m, body:`${ACTORS[k][0]}ถือว่าฝ่ายคุณละเมิดเงื่อนไข ${hit.map(c => '"' + AIDC[c] + '"').join(' และ ')}${why ? ' (' + why + ')' : ''} ลดระดับการหนุนลงหนึ่งขั้น และชะลอการส่งมอบ ${hold * (g.hpm || 1)} ชั่วโมงในเกม` }));
+  return out.map(x => x[0]);
 }
 function applyAlly(g, o){ const ch = {}; for(const k of Object.keys(o || {})) if(k in g.ally && g.ally[k] !== o[k]){ g.ally[k] = o[k]; ch[k] = o[k]; } return ch; }
 function setLevels(target, src, keys, lo, hi){ for(const k of keys){ const v = Number(src[k]); if(src[k] != null && isFinite(v)) target[k] = clamp(Math.round(v), lo, hi); } }
@@ -1177,6 +1224,7 @@ ADVANTAGE CONVERSION. An advantage matters only through a mechanism, and every m
 FORCES. The page tracks both sides' inventories by category from the baseline (GlobalFirepower 2026 totals, not serviceable numbers) and three stock levels from 0 to 100, a game abstraction: pgm (precision-guided munitions), shell (artillery shells and rockets), sam (air-defence missiles). Categories: ${CATK.map(k => k + ' (' + CATS[k][1] + ')').join('; ')}. Assume about half of aircraft and ships and two thirds of ground equipment are serviceable, and only part of that is in this theatre. Losses are whole platforms and stay plausible: most engagements cost 0 to 2 aircraft or ships; ground equipment is lost in single figures in a clash and in tens only in a major battle; never remove more than the engagement described could destroy. Stocks fall with use: a day of heavy fire uses 5 to 10 points, and resupply from an outside backer adds some back. Under 25 a side has to ration that kind of fire; under 10 it cannot sustain it. A side with no platforms of a category cannot use that category.
 WEAPONS ASSESSMENT. Whenever force is used, account for it by domain the way a staff summary would: which category of weapon each side used, what it achieved, what was lost and what it cost in stocks. Keep to categories and outcomes. Never give tactical instructions, targeting data, weapon settings or employment detail (rule 10).
 COALITION. Outside states can back either side. The page tracks a level from -3 to 3 for each of: ${o.actors.map(a => a + ' (' + ACTORS[a][1] + ')').join(', ')}. Positive backs Thailand, negative backs ${o.en}: 0 neutral or mediating, 1 political backing, 2 material support (arms, ammunition, intelligence, logistics, or sanctions on the other side), 3 its forces join the fighting. Model what each state would really do given its interests, treaties and risks. States almost never fight for someone else: level 3 needs a treaty or a vital interest, is preceded by levels 1 and 2, takes days to arrive, and makes that state a party to the war whose forces and territory are then at risk. The player may ask any state for backing, supplies or forces; adjudicate the answer and its price. ${o.en} seeks help too, on its own initiative. When a state reaches 2 or 3, show it in intl, and as its help arrives in mil, forces and stocks. Help that is promised but not yet delivered is reported as promised. Answer every request the player makes to a state. A request that serves a real interest of that state, or comes with something offered in return, usually moves it one level toward the asker within hours; a bare request does not move it, and the note says what it would take. Requests for forces are refused unless the conditions for level 3 are met. Do not leave the levels frozen: outside states react to how the war goes.
+REALISTIC HELP. Help takes real time and has strings. Intelligence sharing works from the next order. Political backing shows in statements and votes, not in the fighting. Weapons come through ARMS deals with delivery times. Credit or a grant arrives as a "fund" line. Combat forces need a government decision and at least 3 to 7 game days to deploy, and treaties only oblige consultation unless they say more. A state's COALITION line may carry "cond": a list of the conditions it attaches to its help, from ${Object.keys(AIDC).join(', ')}; and "breach": one of them, when the side it backs has just broken it in a way the page could not see. The page enforces conditions it can see: a fire mission that kills civilians or hits a capital breaks no_civ or no_capital, after which that state steps back one level and holds its deliveries for a while. The page also gives the side backed at level 2 or more an intelligence edge in battles on the map.
 WAR TERMINATION. Neither side simply fights on. Each weighs capacity, will and backing. A side whose will is 30 or lower looks for a way out: back-channel feelers, a ceasefire request through a mediator, a unilateral pause, withdrawal from a named point, or acceptance of terms. At 10 or lower it accepts unfavourable terms or pulls back. This applies to the player's side as well: when its will or econ runs low, its own government forces the player's hand. The player may at any time offer or accept a ceasefire, accept a mediator, pause unilaterally, withdraw, set terms or accept the other side's terms. Adjudicate both the gains and the domestic price of backing down. After a ceasefire the game continues with verification, violations, prisoners, displaced people, reopening trade and the terms of a settlement.
 ${s.pure ? combatRules(g) : surrenderRule(o)}
 ${o.rules}
@@ -1322,37 +1370,54 @@ function cleanArms(lines){
   return { deals:deals.slice(0,5), fund:fund.slice(0,2) };
 }
 /* a deal is paid for when it is agreed and counts only when it is delivered; an agreed deal that is cancelled is refunded */
-/* a purchase has to arrive while it can still be used: stocks within 5 clock minutes of the deal, equipment within 10 */
-const maxWait = key => STOCKS[key] ? 5 : 10;
+/* the catalogue bounds every deal: delivery inside the package's window, price between 80% of the low price and twice the high one */
+const leadOf = key => (PACKS[key] || {lead:[4,16]}).lead;
+const priceBounds = (key, n) => { const P = PACKS[key]; return P ? [Math.max(1, Math.round(n * P.lo * .8)), Math.round(n * P.hi * 2)] : [0, 20000]; };
+function boundDeal(d, nowM){
+  const L = leadOf(d.key); d.eta = clamp(d.eta, nowM + L[0], nowM + L[1]);
+  if(d.cost > 0){ const B = priceBounds(d.key, d.n); d.cost = clamp(d.cost, B[0], B[1]); }
+}
 function applyArms(g, A, nowM){
   const log = [];
   for(const d of A.deals){
+    if(NOBUY[d.key]){ const cur0 = g.deals.find(x => x.id === d.id); if(cur0 && cur0.st === 'agreed'){ g.fund += cur0.cost; g.spent = Math.max(0, (g.spent || 0) - cur0.cost); }
+      const r = Object.assign(cur0 || { id:'d' + (++g.dealSeq), sup:d.sup, key:d.key, item:d.item, n:d.n, cost:0, eta:nowM }, { st:'refused', note:`${NOBUY[d.key]}สร้างใหม่ใช้เวลาเป็นปี ของมือสองโอนและฝึกลูกเรือไม่ทันในสงครามนี้` });
+      if(!cur0) g.deals.push(r); log.push(Object.assign({}, r)); continue; }
     let cur = g.deals.find(x => x.id === d.id && x.st !== 'delivered');
     if(!cur){ if(!d.n) continue; cur = { id:'d' + (++g.dealSeq), sup:d.sup, key:d.key, item:d.item, n:d.n, cost:d.cost, eta:d.eta != null ? d.eta : nowM + 4, st:'offer', note:d.note }; g.deals.push(cur); }
     else if(cur.st !== 'agreed'){ cur.sup = d.sup; cur.key = d.key; if(d.item) cur.item = d.item; if(d.n) cur.n = d.n; cur.cost = d.cost; if(d.eta != null) cur.eta = d.eta; cur.note = d.note; }
     else { if(d.eta != null) cur.eta = d.eta; if(d.note) cur.note = d.note; }
+    if(cur.st !== 'agreed') boundDeal(cur, nowM);
     if(d.st === 'agreed' && cur.st !== 'agreed'){
       if(cur.cost > g.fund){ cur.st = 'offer'; cur.short = 1; }
-      else { g.fund -= cur.cost; g.spent = (g.spent || 0) + cur.cost; cur.st = 'agreed'; cur.short = 0; cur.eta = clamp(cur.eta, nowM + 0.5, nowM + maxWait(cur.key)); }
+      else { g.fund -= cur.cost; g.spent = (g.spent || 0) + cur.cost; cur.st = 'agreed'; cur.short = 0; boundDeal(cur, nowM); }
     } else if(d.st === 'refused' || d.st === 'cancelled'){ if(cur.st === 'agreed'){ g.fund += cur.cost; g.spent = Math.max(0, (g.spent || 0) - cur.cost); } cur.st = d.st; }
     else if(d.st === 'offer' && cur.st !== 'agreed'){ cur.st = 'offer'; cur.short = 0; }
-    if(cur.st === 'offer') cur.eta = clamp(cur.eta, nowM + 0.5, nowM + maxWait(cur.key));
     log.push(Object.assign({}, cur));
   }
   for(const f of A.fund){ g.fund = Math.max(0, g.fund + f.fund); log.push(f); }
-  if(g.deals.length > 10) g.deals = g.deals.filter(x => x.st === 'offer' || x.st === 'agreed').concat(g.deals.filter(x => x.st !== 'offer' && x.st !== 'agreed').slice(-4)).sort((a,b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+  const keep = x => x.st === 'offer' || x.st === 'agreed' || (g.train || []).some(t => t.id === x.id);
+  if(g.deals.length > 10) g.deals = g.deals.filter(keep).concat(g.deals.filter(x => !keep(x)).slice(-4)).sort((a,b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   return log;
 }
 function deliverArms(g, m){
   let any = false; const S = sideOf(g);
+  if(!Array.isArray(g.train)) g.train = [];
   for(const d of g.deals || []) if(d.st === 'agreed' && d.eta <= m){
-    if(CATS[d.key]){ g.orbat[S.p][d.key] = (g.orbat[S.p][d.key] || 0) + d.n;
-      const ty = Object.keys(UCATS).find(t => UCATS[t].includes(d.key)), u = (g.units || []).filter(x => x.side === S.p && x.type === ty).sort((a,b) => a.str - b.str)[0];
-      if(u){ const st = startForces(S.pCode)[d.key] || 1; u.str = Math.min(100, u.str + clamp(d.n / (u.sh * st) * 100, 3, 30)); } }
-    else g.stock[S.p][d.key] = clamp(g.stock[S.p][d.key] + d.n, 0, 100);
-    d.st = 'delivered'; g.feed.push({ k:'deliv', m, deal:Object.assign({}, d) }); any = true;
+    d.st = 'delivered'; any = true;
+    if(!familiar(S.pCode, d.sup)){ const ready = d.eta + (PACKS[d.key] ? PACKS[d.key].train : 8); g.train.push({ id:d.id, ready }); g.feed.push({ k:'deliv', m, deal:Object.assign({}, d), ready }); }
+    else { useDeal(g, d); g.feed.push({ k:'deliv', m, deal:Object.assign({}, d) }); }
   }
+  g.train = g.train.filter(t => { if(t.ready > m) return true; const d = g.deals.find(x => x.id === t.id); if(d){ useDeal(g, d); g.feed.push({ k:'note', m, body:`ฝึกเสร็จแล้ว ${dealText(d)} นับเป็นกำลังรบตั้งแต่นี้` }); any = true; } return false; });
   return any;
+}
+/* delivered kit joins the forces: equipment tops up the weakest formation of that kind, munitions go to stock */
+function useDeal(g, d){
+  const S = sideOf(g);
+  if(!CATS[d.key]){ g.stock[S.p][d.key] = clamp(g.stock[S.p][d.key] + d.n, 0, 100); return; }
+  g.orbat[S.p][d.key] = (g.orbat[S.p][d.key] || 0) + d.n;
+  const ty = Object.keys(UCATS).find(t => UCATS[t].includes(d.key)), u = (g.units || []).filter(x => x.side === S.p && x.type === ty).sort((a,b) => a.str - b.str)[0];
+  if(u){ const st = startForces(S.pCode)[d.key] || 1; u.str = Math.min(100, u.str + clamp(d.n / (u.sh * st) * 100, 3, 30)); }
 }
 const dealText = d => `${ACTORS[d.sup][0]} · ${d.item || (CATS[d.key] || STOCKS[d.key])[0]} · ${CATS[d.key] ? CATS[d.key][0] + ' ' + nf(d.n) : 'คลัง' + STOCKS[d.key][0] + ' +' + d.n + ' แต้ม'} · ${nf(d.cost)} ล้านดอลลาร์`;
 /* combat mode ends when a side gives up or is defeated */
@@ -1396,9 +1461,10 @@ function combatRules(g){
   const S = sideOf(g), o = oppOf(g), sup = supplierList(g);
   return `${MAP_RULE}
 ARMS PURCHASES. The player's side (${S.pEn}) has an emergency procurement fund in US$ million, a game rule equal to a tenth of its annual defence budget; the state block shows what is left. The enemy has about US$${nf(startFund(S.eCode))} million and buys on its own initiative; report what reaches it through "gain" in injects. Sellers the player can approach: ${sup.map(a => a + ' (' + ACTORS[a][1] + ')').join(', ')}. Model the real arms market in wartime:
-- Delivery has to be usable in this war. Munitions and missiles from a seller's own stocks, air-defence missiles, artillery ammunition, drones, anti-tank weapons and spare parts arrive by air 2 to 5 clock minutes after the deal. Second-hand vehicles, artillery, patrol craft or aircraft from a seller's or backer's stocks arrive 5 to 10 clock minutes after the deal. Never quote a later delivery: the page caps it. New-build combat aircraft, major warships and submarines take years, so refuse those and offer the nearest thing that can arrive in time. Delivered equipment goes to the buyer's weakest formation of that kind.
-- Sellers decide by interest and law: export licences and end-use conditions; some states do not sell to a party in an active war or to the side seen as the aggressor; a state backing the enemy refuses or stalls; a backer at level 2 or 3 sells fast, gives credit or donates. Equipment the buyer already operates is usable on delivery; unfamiliar systems need training before they count, so deliver them later or in smaller numbers. Supplier pattern in the baseline (SIPRI, 2021–25): Thailand bought mainly from China (49%), the United States (15%) and Israel (9.2%); Indonesia from Italy (40%), the United States (16%) and France (14%). For other buyers use general knowledge.
-- Price: the order of magnitude of publicly reported contract values plus a wartime premium of 20% to 100% for urgency; lower with slower delivery, credit or conditions. Prices are game estimates. A stock purchase of 10 points is a large emergency resupply.
+- The page holds a catalogue and enforces it; one clock minute is ${g.hpm || 1} game hours. ${Object.keys(PACKS).map(k => `${k}: package of ${PACKS[k].n} ${STOCKS[k] ? 'stock points' : 'units'}, US$${PACKS[k].lo}–${PACKS[k].hi} million per ${STOCKS[k] ? 'point' : 'unit'} before the wartime premium, arrives ${PACKS[k].lead[0]}–${PACKS[k].lead[1]} clock minutes after the deal`).join('; ')}. Quote n, cost and eta inside these bounds; the page clamps anything outside them. Combat aircraft, major warships and submarines cannot be obtained during the war (new ones take years, second-hand ones cannot be transferred and crewed in time): refuse them and offer what can arrive. A seller's own legal process counts: for example the United States notifies Congress 30 days before transferring excess defence articles of US$7 million or more, so its second-hand equipment comes through a presidential drawdown or not at all. Delivered equipment goes to the buyer's weakest formation of that kind.
+- Training: kit from a seller whose equipment the buyer does not already operate (buyer's sellers: ${(FAMILY[S.pCode] || []).join(', ') || 'none listed'}) counts only after the page's training time. Mention it in the note.
+- Sellers decide by interest and law: export licences and end-use conditions; some states do not sell to a party in an active war or to the side seen as the aggressor; a state backing the enemy refuses or stalls; a backer at level 2 or 3 sells fast, gives credit or donates. Supplier pattern in the baseline (SIPRI, 2021–25): Thailand bought mainly from China (49%), the United States (15%) and Israel (9.2%); Indonesia from Italy (40%), the United States (16%) and France (14%). For other buyers use general knowledge.
+- Price: the catalogue range plus a wartime premium of 20% to 100% for urgency; lower with slower delivery, credit or conditions. A seller backing the buyer at level 2 or 3 may sell at cost, on credit or donate (cost 0). Every offer from a state carries its real conditions: put them in the note and, for a state's help in general, in its COALITION line as "cond".
 - Bargaining: the first answer to a request is an offer (st "offer") with price, delivery minute and conditions. The player may accept, counter on price, quantity, delivery or conditions, or walk away. A reasoned counter earns a better offer; a lowball or a threat earns a worse one or a refusal. Only the player's explicit acceptance of a standing offer makes it "agreed". Never mark a deal agreed if it costs more than the fund. Deliveries can be delayed or lost to enemy action: then change the deal's eta or cancel it and say why. The player borrows from its own treasury through the page, up to the credit line in the state block. You add money only as credit or a gift from a state that backs the player's side, as a "fund" line, and you may take money away the same way.
 ENDING THE WAR. The game ends when a side gives up or is defeated. Set STATUS to op_yield or th_yield when that side's command stops fighting and accepts terms: when its mil or will is 15 or lower, when its main forces in the theatre are destroyed or cut off, when its capital or main bases are lost with no backer stepping in, or when it accepts the other side's terms in talks. The enemy does not give up early for the player's convenience and does not fight to the last man either: below will 30 it sends feelers and offers terms. Report its current offer or demand in TERMS. The player may accept the enemy's terms, make a counter-offer, demand surrender, or surrender. A demand without the means to force it stiffens the enemy. Once STATUS is op_yield or th_yield the page ends the game, so set it only when it is final.
 PAGE RULES ON WILL AND ENDINGS. The page enforces these; keep your numbers consistent with them. A side's will cannot exceed 35 + its mil. Each clock minute of fighting costs each side 0.15 will, 0.5 more if its mil is below 60% of the other side's, and 0.1 more for each of its own places the enemy holds. A side whose mil or will is ${BREAK} or lower is at its breaking point (see BREAKING POINT in the state); if it does not recover above ${BREAK + 5} within ${BREAK_MIN} clock minutes the page ends the war with that side's defeat. Raise will only for a real event (a clear victory, an objective retaken, a patron joining), never to keep a side in the war. Battles the page resolves on the map also move the initiative track. A ceasefire both commands accept is STATUS ceasefire: while it holds the page stops the fighting on the map, and if it holds for ${BREAK_MIN} clock minutes the war ends as a negotiated settlement judged on forces, places held and terms. Set STATUS back to war if either side breaks it.`;
@@ -1574,6 +1640,12 @@ function setHold(g, code, side, m, how){
   }
   return true;
 }
+/* munitions: a side on the offensive fires more; the player's posture for that domain sets the rate, the enemy fires at a steady rate */
+function burnRate(g, sd, type){ if(sd !== sideOf(g).p) return g.diff === 'hard' ? .8 : .6; const p = (g.post || {})[type] != null ? g.post[type] : 1; return [.3, .5, .8, 1.2][clamp(p, 0, 3)]; }
+function spend(g, sd, k, amt){ g.acc = g.acc || {}; const a = 'use' + sd + k; g.acc[a] = (g.acc[a] || 0) + amt; const w = Math.floor(g.acc[a]); if(w > 0){ g.acc[a] -= w; g.stock[sd][k] = clamp(g.stock[sd][k] - w, 0, 100); } }
+/* outside states backing a side at level 2 or 3 share intelligence: better targeting in battles on the map */
+function backing(g, sd){ let best = 0; for(const k of Object.keys(g.ally || {})){ const v = g.ally[k] * (sd === 'th' ? 1 : -1); if(v > best) best = v; } return best; }
+const intelEdge = (g, sd) => { const b = backing(g, sd); return b >= 3 ? .2 : b >= 2 ? .1 : 0; };
 /* one round of fighting between the formations of one type at one place */
 function fightRound(g, code, type, m){
   const A = unitsAt(g, code, 'th', type), B = unitsAt(g, code, 'op', type); if(!A.length || !B.length) return false;
@@ -1584,11 +1656,11 @@ function fightRound(g, code, type, m){
     if(type !== 'air' && unitsAt(g, code, sd, 'air').length && !unitsAt(g, code, en, 'air').length) k *= 1.3;       /* air cover */
     if(type === 'land' && g.hold[code] === sd) k *= 1.4;                                                              /* prepared defence */
     if(g.stock[sd][type === 'air' ? 'pgm' : 'shell'] < 25) k *= .75;                                                  /* short of munitions */
-    if(sd === S.p) k *= .7 + .03 * g.stats.cred; return k * (.85 + Math.random() * .3); };
+    if(sd === S.p) k *= .7 + .03 * g.stats.cred; k *= 1 + intelEdge(g, sd); return k * (.85 + Math.random() * .3); };
   const pa = A.reduce((s,u) => s + unitPower(g,u), 0) * mod('th'), pb = B.reduce((s,u) => s + unitPower(g,u), 0) * mod('op'), tot = pa + pb || 1;
   const hit = (list, share, sd) => { const each = 9 * share / list.length; list.forEach(u => { F[sd] += loseStr(g, u, each * (1 + (list.length - 1) * .25)); }); };
   hit(A, pb / tot, 'th'); hit(B, pa / tot, 'op');
-  ['th','op'].forEach(sd => { const k = type === 'air' ? 'pgm' : 'shell'; if(Math.random() < .5) g.stock[sd][k] = clamp(g.stock[sd][k] - 1, 0, 100); });
+  ['th','op'].forEach(sd => spend(g, sd, type === 'air' ? 'pgm' : 'shell', burnRate(g, sd, type)));
   g.toll.dead += Math.round(3 + Math.random() * 6);
   /* broken formations pull back or are lost */
   A.concat(B).forEach(u => { if(u.str <= 6){ g.units = g.units.filter(x => x !== u); mapNote(g, m, `${u.name} สูญเสียสภาพการรบ`, u.side === S.p ? 'lost' : 'take'); }
@@ -1648,10 +1720,50 @@ function enemyAI(g, m){
   }
   return ch;
 }
+/* fire missions: the player picks a target place and a weapon. Each weapon needs a shooter in range and stock,
+   costs stock, can be shot down or miss, and risks civilian deaths where people live. Ranges and effects are game values. */
+const FIRE = {
+  arty:{ th:'ปืนใหญ่และจรวด', need:'land', km:40, stock:'shell', cost:2, dmg:6, civ:1, sam:0, note:'ต้องมีหน่วยทางบกห่างเป้าไม่เกิน 40 กม. ใช้คลังกระสุนปืนใหญ่ 2 แต้ม' },
+  pgm:{ th:'โจมตีทางอากาศด้วยอาวุธนำวิถี', need:'air', km:900, stock:'pgm', cost:2, dmg:7, civ:.3, sam:.3, note:'ต้องมีหน่วยทางอากาศ ใช้คลังอาวุธนำวิถี 2 แต้ม แม่นยำ พลเรือนเสี่ยงน้อย' },
+  dumb:{ th:'ทิ้งระเบิดไม่นำวิถี', need:'air', km:900, stock:null, cost:0, dmg:4, civ:3, sam:.5, note:'ไม่ใช้คลัง แต่ต้องบินต่ำเข้าใกล้ โดนยิงตกง่ายกว่า และพลเรือนเสี่ยงสูง' },
+  naval:{ th:'ยิงจากเรือ', need:'sea', km:60, stock:'shell', cost:1, dmg:4, civ:.8, sam:0, note:'ต้องมีหน่วยทางเรือห่างเป้าไม่เกิน 60 กม. ใช้คลังกระสุน 1 แต้ม' }
+};
+function shooters(g, w, code){
+  const F = FIRE[w], S = sideOf(g);
+  return g.units.filter(u => u.side === S.p && !u.to && u.type === F.need && u.str > 10 && kmBetween(PLACES[u.at], PLACES[code]) <= F.km);
+}
+function fireCheck(g, w, code){
+  const F = FIRE[w], S = sideOf(g), meta = pmeta(g, code);
+  if(!meta || meta.own === 'x') return 'ยิงเข้าประเทศที่สามไม่ได้';
+  if(!shooters(g, w, code).length) return `ไม่มีหน่วย${UTYPE[F.need]}ในระยะ ${F.km} กม.`;
+  if(F.stock && g.stock[S.p][F.stock] < F.cost) return `${STOCKS[F.stock][0]}ในคลังไม่พอ`;
+  const last = (g.fireT || {})[w]; if(last != null && minute(g) - last < 1) return `${F.th}ยิงได้ครั้งละหนึ่งภารกิจต่อ ${g.hpm || 1} ชั่วโมงในเกม`;
+  return null;
+}
+function fireMission(g, w, code){
+  const err = fireCheck(g, w, code); if(err) return err;
+  const F = FIRE[w], S = sideOf(g), m = minute(g), meta = pmeta(g, code), E = S.e, shots = shooters(g, w, code), out = [];
+  g.fireT = g.fireT || {}; g.fireT[w] = m;
+  if(F.stock) g.stock[S.p][F.stock] = clamp(g.stock[S.p][F.stock] - F.cost, 0, 100);
+  if(g.status === 'ceasefire'){ g.status = 'war'; out.push('การยิงนี้ละเมิดหยุดยิง สถานะกลับเป็นสงคราม'); }
+  /* air defence: the target's SAM stock decides the risk to the aircraft */
+  if(F.sam && g.stock[E].sam > 10 && Math.random() < F.sam){ loseStr(g, shots[0], 4); g.stock[E].sam = clamp(g.stock[E].sam - 1, 0, 100); out.push(`${shots[0].name}ถูกยิงตอบโต้ เสียกำลัง`); }
+  const tgt = unitsAt(g, code, E).filter(u => w === 'naval' ? u.type !== 'air' : true), power = Math.min(1.5, shots.reduce((a,u) => a + u.str, 0) / 100) * (1 + intelEdge(g, S.p));
+  if(tgt.length){ const each = F.dmg * power * (.7 + Math.random() * .6) / tgt.length; tgt.forEach(u => loseStr(g, u, each)); out.push(`ถูก${tgt.map(u => u.name).join(', ')}`); }
+  else out.push('ไม่มีหน่วยข้าศึกอยู่ที่เป้า ยิงโดนแต่ที่ตั้งและเส้นทาง');
+  /* civilians: where people live, imprecise weapons kill more; a capital is worst */
+  let dead = 0; if(meta.kind !== 'S'){ const base = CAPITAL[code] ? 20 : meta.key ? 10 : 4; dead = Math.round(base * F.civ * Math.random() * 1.5); }
+  if(dead){ g.toll.dead += dead; out.push(`มีรายงานพลเรือนเสียชีวิตราว ${dead} คน`); }
+  mapNote(g, m, `ภารกิจยิง: ${F.th} ใส่${placeName(code)} · ${out.join(' · ')}`, tgt.length ? 'win' : 'draw');
+  const br = (dead ? ['no_civ'] : []).concat(CAPITAL[code] && meta.own === E ? ['no_capital'] : []);
+  if(br.length) breachAid(g, br, `${F.th}ที่${placeName(code)}`);
+  return null;
+}
 /* advance the map to clock minute m: arrivals, rounds of fighting, the enemy's moves */
 function simUnits(g, m){
   if(!g.units) return false; let ch = false;
-  const stepTo = t => { for(const u of g.units) if(u.to && u.eta <= t){ u.at = u.to; u.to = null; u.from = null; ch = true; if(u.side === sideOf(g).p) mapNote(g, u.eta, `${u.name} ถึง${placeName(u.at)}`, null); } };
+  const stepTo = t => { for(const u of g.units) if(u.to && u.eta <= t){ u.at = u.to; u.to = null; u.from = null; ch = true; if(u.side === sideOf(g).p){ mapNote(g, u.eta, `${u.name} ถึง${placeName(u.at)}`, null);
+    const pm = pmeta(g, u.at); if(u.type === 'land' && pm && pm.own === sideOf(g).e) breachAid(g, 'defensive', `${u.name}เข้า${placeName(u.at)}`); } } };
   let guard = 0;
   const quiet = g.status === 'ceasefire';
   while(g.simT + SIM_STEP <= m && guard++ < 400){ g.simT += SIM_STEP; stepTo(g.simT); if(quiet) continue; if(simRound(g, g.simT)) ch = true;
@@ -1754,7 +1866,7 @@ function step(g){
   }
   if(changed || sampled){ dirty = true; if(changed){ paintFeed(); paintDecs(true); } paintMap(); paintStatus(); if(important) persist(true); }
 }
-function snap(g){ return { s:KEYS.map(k => g.stats[k]), d:BOARD.map(k => g.dom[k]), t:[g.toll.dead, g.toll.displaced], b:[...DIMK.map(k => g.bal.th[k]), ...DIMK.map(k => g.bal.op[k])], w:AUDK.map(k => g.world[k]), st:g.status }; }
+function snap(g){ return { s:KEYS.map(k => g.stats[k]), d:BOARD.map(k => g.dom[k]), t:[g.toll.dead, g.toll.displaced], b:[...DIMK.map(k => g.bal.th[k]), ...DIMK.map(k => g.bal.op[k])], w:AUDK.map(k => g.world[k]), st:g.status, k:g.stock ? [...STOCKK.map(k => g.stock.th[k]), ...STOCKK.map(k => g.stock.op[k])] : null }; }
 function endGame(g, reason){
   g.phase = 'over'; g.endReason = reason; g.el = Math.min(g.el, g.dur*60000);
   while(g.hist.length <= Math.min(Math.floor(minute(g)), g.dur)) g.hist.push(snap(g));
@@ -2364,7 +2476,8 @@ function renderHome(){
       h('ul',{class:'rules small'},
         h('li',{text:'โหมดรบ: สงครามกับกัมพูชา เวียดนาม มาเลเซีย หรืออินโดนีเซีย ทีละประเทศ เลือกได้ว่าจะบัญชาการฝ่ายไหน เน้นการรบล้วน ไม่มีเหตุการณ์การเมือง เหตุชนวนเป็นเรื่องสมมติ กำลังรบและข้อตกลงเป็นข้อมูลจริงที่มีแหล่งอ้างอิง'}),
         h('li',{text:'เงินสงคราม (โหมดรบ): แถบบนและโต๊ะสั่งการแสดงเงินพร้อมใช้ เงินที่ผูกพันแล้ว ยอดกู้ และวงเงินกู้ที่เหลือ กู้ได้ทันทีโดยแลกกับเศรษฐกิจที่ลดลง'}),
-        h('li',{text:'จัดหาอาวุธ (โหมดรบ): มีกองทุนจัดหาฉุกเฉิน ขอซื้อจากประเทศผู้ขาย ผู้ขายตอบเป็นข้อเสนอ คุณรับ ต่อราคา เร่งส่งมอบ หรือยกเลิกได้ ของถึงภายใน 5 นาทีสำหรับกระสุนและขีปนาวุธ ภายใน 10 นาทีสำหรับยุทโธปกรณ์ และเสริมกำลังให้หน่วยที่อ่อนที่สุด'}),
+        h('li',{text:'จัดหาอาวุธ (โหมดรบ): เลือกผู้ขายและชุดอาวุธจากรายการที่ซื้อได้จริงในสงคราม เห็นช่วงราคา (อ้างอิงราคาสาธารณะเมื่อมี) เวลาส่งมอบ และต้องฝึกก่อนใช้หรือไม่ กระสุนและอาวุธนำวิถีถึงทางอากาศใน 1–4 วัน ยุทโธปกรณ์มือสองถึงทางเรือในหลายสัปดาห์ ระบบจากผู้ขายที่ไม่เคยใช้ต้องฝึกก่อน เครื่องบินรบ เรือรบหลัก และเรือดำน้ำซื้อไม่ทัน'}),
+        h('li',{text:'ภารกิจยิง (โหมดรบ): เลือกเป้าบนแผนที่แล้วเลือกอาวุธ ปืนใหญ่และจรวดต้องมีหน่วยในระยะ อาวุธนำวิถีแม่นแต่ใช้คลัง ระเบิดไม่นำวิถีไม่ใช้คลังแต่เสี่ยงถูกยิงตกและพลเรือนเสียชีวิต การยิงใส่เมืองหรือเมืองหลวงอาจทำให้ผู้หนุนถอนความช่วยเหลือ'}),
         h('li',{text:'แผนที่การรบ (โหมดรบ): แต่ละฝ่ายมีหน่วยทางบก ทางเรือ ทางอากาศอยู่บนแผนที่ สั่งเคลื่อนไปจุดหมายได้ หน่วยเดินทางตามระยะทางจริง ถึงจุดที่ไม่มีข้าศึกจะยึดได้ ถ้ามีข้าศึกจะรบกันเป็นรอบ ทุกจุดมีสีบอกว่าใครถือครอง และข้าศึกเคลื่อนทัพตีโต้เอง'}),
         h('li',{text:'กำลังรบและอาวุธ: จำนวนเครื่องบิน รถถัง ปืนใหญ่ เรือรบ เรือดำน้ำของสองฝ่าย หักความสูญเสียตามผลการรบ พร้อมระดับคลังอาวุธ'}),
         h('li',{text:'พันธมิตรและประเทศที่สาม: แตะชื่อประเทศในแผงเพื่อขอ ทุกประเทศมีบรรทัดบอกว่ากำลังทำอะไรและต้องการอะไรตอบแทน ขอการหนุนทางการเมือง อาวุธ ข่าวกรอง หรือกำลังร่วมรบได้ อีกฝ่ายก็ดึงพันธมิตรได้เช่นกัน'}),
@@ -2511,7 +2624,7 @@ function feedItem(s, f, isNew){
     el = h('article',{class:'fi fi-fight ' + (f.kind || '')}, meta, h('p',{text:f.text}));
   } else if(f.k==='deliv'){
     meta.append(h('span',{text:'ส่งมอบอาวุธ'}));
-    el = h('article',{class:'fi fi-sys fi-deliv'}, meta, h('p',null, h('b',{text:'ส่งมอบแล้ว เข้าประจำการฝ่ายคุณ: '}), dealText(f.deal)));
+    el = h('article',{class:'fi fi-sys fi-deliv'}, meta, h('p',null, h('b',{text: f.ready != null ? `ถึงแล้ว แต่ยังไม่เคยใช้ระบบของผู้ขายนี้ ต้องฝึกก่อน ใช้ได้ ${gameClock(f.ready)}: ` : 'ส่งมอบแล้ว เข้าประจำการฝ่ายคุณ: '}), dealText(f.deal)));
   } else if(f.k==='miss'){
     meta.append(h('span',{text:'พ้นกำหนดโดยไม่มีคำสั่ง'}));
     el = h('article',{class:'fi fi-miss'}, meta, h('h3',{text:f.title}), h('p',{text:f.miss}), deltaChips(s, f.delta));
@@ -2812,10 +2925,16 @@ function paintForces(){
   STOCKK.forEach(k => { const a = G.stock.th[k], b = G.stock.op[k];
     rows.push(h('div',{class:'bal-r' + ((a < 25 || b < 25) ? ' lowstock' : ''),role:'img','aria-label':`${STOCKS[k][0]} ไทย ${a} ${SIDES.op} ${b}`},
       h('b',{text:String(a)}), h('div',{class:'bb l'}, h('i',{style:`width:${a}%`})), h('span',{class:'bl',text:STOCKS[k][0]}), h('div',{class:'bb r'}, h('i',{style:`width:${b}%`})), h('b',{text:String(b)}))); });
+  if(scn(G.sid).pure){
+    const S = sideOf(G), hs = (G.hist || []).filter(x => x.k), a = hs[Math.max(0, hs.length - 7)], b = hs[hs.length - 1], off = S.p === 'th' ? 0 : STOCKK.length, span = hs.length > 1 ? Math.min(6, hs.length - 1) : 0;
+    const left = STOCKK.map((k, i) => { const now = G.stock[S.p][k], rate = span && a && b ? (a.k[off + i] - b.k[off + i]) / span : 0;
+      return `${STOCKS[k][0]} ${rate > 0 ? 'ราว ' + Math.max(0, Math.round(now / rate * (G.hpm || 1) / 24)) + ' วัน' : 'ยังไม่ได้ใช้'}`; });
+    rows.push(h('p',{class:'small',text:`ฝ่ายคุณยิงได้อีกตามอัตราใช้ช่วงล่าสุด: ${left.join(' · ')} ท่าทีรุกใช้กระสุนมากกว่าตั้งรับราว 2–4 เท่า`}));
+  }
   rows.push(h('p',{class:'small muted',text:'จำนวนตั้งต้นจาก GlobalFirepower 2026 เป็นจำนวนรวม ไม่ใช่จำนวนที่พร้อมรบ ตัวเลขหลังเครื่องหมายลบคือที่เสียไปในเกม คลังต่ำกว่า 25 ต้องจำกัดการยิง'}));
   ui.forceBox.replaceChildren(...rows);
 }
-const ALLYREQ = ['หนุนทางการเมือง','ส่งอาวุธและข่าวกรอง','ส่งกำลังร่วมรบ','เป็นคนกลางเจรจา','หยุดช่วยอีกฝ่าย'];
+const ALLYREQ = ['แบ่งปันข่าวกรอง','หนุนทางการเมืองและในเวทีสหประชาชาติ','ขายหรือให้อาวุธจากคลัง','ให้เครดิตหรือเงินช่วยเหลือ','ส่งกำลังร่วมรบ','เป็นคนกลางเจรจา','หยุดช่วยอีกฝ่าย'];
 function paintCoalition(){
   if(!ui || !ui.allyBox || !G) return;
   const run = G.phase === 'run', keys = Object.keys(G.ally).filter(k => ACTORS[k]), notes = G.allyNote || {};
@@ -2828,10 +2947,11 @@ function paintCoalition(){
       onclick:() => { ui.allySel = sel ? null : k; paintCoalition(); }},
       h('span',{class:'wo-l',text:ACTORS[k][0]}), h('div',{class:'wo-t'}, x !== 0 ? fill : null), h('span',{class:'wo-v',text: x === 0 ? 'เป็นกลาง' : ALLYS[Math.abs(x)]})));
     if(notes[k]) rows.push(h('p',{class:'ally-note small muted',text:notes[k]}));
+    const cd = (G.cond || {})[k] || []; if(cd.length) rows.push(h('div',{class:'cond','aria-label':'เงื่อนไขของ' + ACTORS[k][0]}, cd.map(c => h('span',{text:AIDC[c]}))));
     if(sel && run) rows.push(h('div',{class:'optrow ally-act'}, ALLYREQ.map(r => h('button',{class:'pick',type:'button',onclick:() => { openDesk(true); insertText(`ขอให้${ACTORS[k][0]}: ${r} โดยเสนอ `, true); }}, r))));
   });
   const joined = keys.filter(k => Math.abs(G.ally[k]) === 3);
-  rows.push(h('p',{class:'small muted',text: (joined.length ? 'ร่วมรบแล้ว: ' + joined.map(k => `${ACTORS[k][0]} (ฝ่าย${G.ally[k] > 0 ? 'ไทย' : SIDES.op})`).join(' · ') + ' · ' : '') + 'แตะชื่อประเทศเพื่อขอความช่วยเหลือ ระดับ: เป็นกลาง → หนุนทางการเมือง → ส่งอาวุธและข่าวกรอง → ส่งกำลังร่วมรบ ประเทศจะขยับเมื่อคำขอตรงกับผลประโยชน์ของเขาหรือมีข้อแลกเปลี่ยน คำตอบมากับผลของคำสั่ง'}));
+  rows.push(h('p',{class:'small muted',text: (joined.length ? 'ร่วมรบแล้ว: ' + joined.map(k => `${ACTORS[k][0]} (ฝ่าย${G.ally[k] > 0 ? 'ไทย' : SIDES.op})`).join(' · ') + ' · ' : '') + 'แตะชื่อประเทศเพื่อขอความช่วยเหลือ ระดับ: เป็นกลาง → หนุนทางการเมือง → ส่งอาวุธและข่าวกรอง → ส่งกำลังร่วมรบ ประเทศจะขยับเมื่อคำขอตรงกับผลประโยชน์ของเขาหรือมีข้อแลกเปลี่ยน คำตอบมากับผลของคำสั่ง ข่าวกรองมีผลตั้งแต่คำสั่งถัดไป ฝ่ายที่มีผู้หนุนระดับ 2 ได้เปรียบในการรบบนแผนที่ 10% ระดับ 3 ได้ 20% กำลังรบของต่างชาติใช้เวลาอย่างน้อย 3–7 วันในเกม ความช่วยเหลือมีเงื่อนไข ถ้าฝ่ายคุณละเมิด ประเทศนั้นลดระดับและชะลอการส่งมอบ'}));
   ui.allyBox.replaceChildren(...rows);
 }
 function allyAnswers(f){
@@ -2945,6 +3065,17 @@ function paintFront(){
         h('div',{class:'ui'}, h('b',{text:u.name}), h('span',{class:'small muted',text:` ${where}`}), h('div',{class:'bb'}, h('i',{style:`width:${u.str}%`})), ctl), h('span',{class:'us',text:Math.round(u.str) + '%'})));
     });
   });
+  if(run && G.units.some(u => u.side === S.p)){
+    const tg = Object.keys(PLACES).filter(c => { const pm = pmeta(G, c); return pm && pm.own !== 'x'; }).sort((a,b) => unitsAt(G, b, S.e).length - unitsAt(G, a, S.e).length);
+    if(!ui.fireTgt || !tg.includes(ui.fireTgt)) ui.fireTgt = tg[0];
+    rows.push(h('p',{class:'eyebrow',text:'ภารกิจยิง: เลือกเป้าแล้วเลือกอาวุธ'}));
+    rows.push(h('select',{class:'usel',id:'fire-tgt','aria-label':'เป้าหมายของภารกิจยิง',onchange:e => { ui.fireTgt = e.target.value; paintFront(); }},
+      tg.map(c => { const n = unitsAt(G, c, S.e).length; return h('option',{value:c,selected:c === ui.fireTgt}, `${placeName(c)}${n ? ' · ข้าศึก ' + n + ' หน่วย' : ''}${CAPITAL[c] ? ' · เมืองหลวง' : ''}`); })));
+    rows.push(h('div',{class:'fire'}, Object.keys(FIRE).map(w => { const why = fireCheck(G, w, ui.fireTgt);
+      return h('div',{class:'fire-r'}, h('button',{class:'pick',type:'button',id:'fire-' + w,disabled:!!why,onclick:() => {
+        const e = fireMission(G, w, ui.fireTgt); if(ui.mapNote) ui.mapNote.textContent = e || ''; dirty = true; paintFeed(); paintStatus(); paintFront(); persist(true); }}, FIRE[w].th),
+        h('span',{class:'small muted',text: why || FIRE[w].note})); })));
+  }
   const log = (G.mapLog || []).slice(-5).reverse();
   if(log.length){ rows.push(h('p',{class:'eyebrow',text:'เหตุการณ์ล่าสุดบนแผนที่'})); log.forEach(e => rows.push(h('p',{class:'small',text:`${gameClock(e.m)} · ${e.text}`}))); }
   rows.push(h('p',{class:'small muted',text:'แตะหน่วยของคุณบนแผนที่แล้วแตะจุดที่มีวงแหวน หรือเลือกจุดหมายจากรายการ หน่วยเดินทางตามระยะทางจริง ทางถนนราว 240 กม. ต่อวัน ทางเรือราว 700 กม. ต่อวัน ถึงจุดที่ไม่มีข้าศึกจะยึดได้ในรอบถัดไป ถ้ามีข้าศึกจะรบกันทุก 3 ชั่วโมงในเกม ฝ่ายตั้งรับได้เปรียบ การคุ้มกันทางอากาศและคลังกระสุนมีผล กำลังต่ำกว่า 25% หน่วยจะถอย ค่ากำลังของหน่วยเป็นค่าประเมินของเกมจากตัวเลขกำลังรบตั้งต้น'}));
@@ -3000,18 +3131,29 @@ function paintArms(){
   }
 }
 function buildArmsDesk(g){
-  const sup = supplierList(g), items = CATK.map(k => [k, CATS[k][0], 'หน่วย']).concat(STOCKK.map(k => [k, 'คลัง' + STOCKS[k][0], 'แต้ม']));
-  const sSel = h('select',{id:'arms-sup','aria-label':'ผู้ขาย'}, sup.map(a => h('option',{value:a}, ACTORS[a][0])));
-  const iSel = h('select',{id:'arms-item','aria-label':'รายการ'}, items.map(it => h('option',{value:it[0]}, it[1])));
-  const nInp = h('input',{id:'arms-n',type:'number',min:'1',max:'500',value:'10',inputmode:'numeric','aria-label':'จำนวน'});
-  const add = () => { const it = items.find(x => x[0] === iSel.value), n = clamp(Math.round(Number(nInp.value) || 1), 1, 500);
-    insertText(`จัดหาอาวุธ: ขอซื้อ${it[1]} ${n} ${it[2]} จาก${ACTORS[sSel.value][0]} ขอราคา เวลาส่งมอบ และเงื่อนไข`); };
+  const S = sideOf(g), sup = supplierList(g), hpm = g.hpm || 1, days = mins => Math.round(mins * hpm / 24);
+  const sSel = h('select',{id:'arms-sup','aria-label':'ผู้ขาย'}, sup.map(a => h('option',{value:a}, ACTORS[a][0] + (familiar(S.pCode, a) ? ' ✓' : ''))));
+  const iSel = h('select',{id:'arms-item','aria-label':'รายการ'}, Object.keys(PACKS).map(k => h('option',{value:k}, PACKS[k].th)));
+  const nSel = h('select',{id:'arms-n','aria-label':'จำนวนชุด'}, [1,2,3,4].map(q => h('option',{value:String(q)}, q + ' ชุด')));
+  const info = h('div',{class:'packinfo',id:'packinfo','aria-live':'polite'});
+  const show = () => {
+    const P = PACKS[iSel.value], q = Number(nSel.value), n = P.n * q, fam = familiar(S.pCode, sSel.value), B = priceBounds(iSel.value, n), unit = STOCKS[iSel.value] ? 'แต้มคลัง' : 'หน่วย';
+    info.replaceChildren(
+      h('span',null, h('b',{text:`${P.th} × ${q}`}), ` = ${nf(n)} ${unit}`),
+      h('span',{text:`ราคาประมาณ ${nf(Math.round(n * P.lo))}–${nf(Math.round(n * P.hi))} ล้านดอลลาร์ก่อนบวกค่าเร่งด่วนช่วงสงคราม 20–100% (ผู้ขายเสนอได้ ${nf(B[0])}–${nf(B[1])})`}),
+      h('span',{text:`ส่งมอบ ${days(P.lead[0])}–${days(P.lead[1])} วันหลังตกลง · ${P.by}`}),
+      h('span',{text: fam ? `✓ ฝ่ายคุณใช้ระบบของ${ACTORS[sSel.value][0]}อยู่แล้ว ใช้ได้ทันทีที่ถึง` : `ฝ่ายคุณยังไม่เคยใช้ระบบของ${ACTORS[sSel.value][0]} ต้องฝึกอีก ${days(P.train)} วันหลังของถึงจึงนับเป็นกำลังรบ`}),
+      h('span',{class:'small muted',text:P.src}));
+  };
+  [sSel, iSel, nSel].forEach(x => x.addEventListener('change', show)); show();
+  const add = () => { const P = PACKS[iSel.value], q = Number(nSel.value), n = P.n * q;
+    insertText(`จัดหาอาวุธ: ขอซื้อ${P.th} × ${q} ชุด (รายการ ${iSel.value} จำนวน ${n} ${STOCKS[iSel.value] ? 'แต้มคลัง' : 'หน่วย'}) จาก${ACTORS[sSel.value][0]} ขอราคา เวลาส่งมอบ และเงื่อนไข`); };
   ui.fundLine = h('p',{id:'fundline'}); ui.moneyBox = h('div',{class:'money',id:'moneybox'}); ui.dealBox = h('div',{class:'deals',id:'dealbox'});
   return h('details',{class:'base postwrap',id:'armsdesk',open:true},
     h('summary',{text:'เงินสงคราม จัดหาอาวุธ และต่อรอง'}), ui.fundLine, ui.moneyBox, h('p',{class:'eyebrow',text:'ขอซื้ออาวุธ'}),
-    h('div',{class:'armsrow'}, sSel, iSel, nInp), h('div',{class:'optrow'}, h('button',{class:'btn',type:'button',id:'arms-add',onclick:add},'ใส่คำขอซื้อลงคำสั่ง'),
+    h('div',{class:'armsrow'}, sSel, iSel, nSel), info, h('div',{class:'optrow'}, h('button',{class:'btn',type:'button',id:'arms-add',onclick:add},'ใส่คำขอซื้อลงคำสั่ง'),
       h('button',{class:'pick',type:'button',onclick:() => insertText('จัดหาอาวุธ: ขอเครดิตหรือความช่วยเหลือแบบให้เปล่าจาก ', true)},'ขอเครดิตหรือของให้เปล่าจากพันธมิตร')),
-    h('p',{class:'small muted',text:'กระสุน ขีปนาวุธ โดรน ถึงภายใน 5 นาทีหลังตกลง ยุทโธปกรณ์มือสองถึงภายใน 10 นาที แล้วเสริมกำลังให้หน่วยที่อ่อนที่สุดของคุณ เครื่องบินรบและเรือรบต่อใหม่ใช้เวลาเป็นปีจึงซื้อไม่ได้ ผู้ขายอาจปฏิเสธหรือตั้งเงื่อนไข ราคาเป็นค่าประมาณของเกม'}),
+    h('p',{class:'small muted',text:`ซื้อไม่ได้ระหว่างสงคราม: ${Object.values(NOBUY).join(' ')} เพราะของใหม่ใช้เวลาเป็นปี ของมือสองโอนและฝึกลูกเรือไม่ทัน ผู้ขายตัดสินตามกฎหมายและผลประโยชน์ อาจปฏิเสธ ชะลอ หรือตั้งเงื่อนไขการใช้งาน ผู้ที่หนุนคุณระดับ 2 ขึ้นไปอาจขายราคาทุน ให้เครดิต หรือให้เปล่า`}),
     ui.dealBox);
 }
 function endTitle(g, s){

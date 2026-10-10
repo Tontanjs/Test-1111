@@ -951,6 +951,7 @@ function buildFinal(g){
   const why = g.endReason==='time' ? `The ${g.dur} minutes are over${s.pure ? ' and neither side has given up: the war ends undecided' : ''}.`
     : g.endReason==='won' ? `The war ended at T+${minute(g).toFixed(1)}: ${sideOf(g).eEn} gave up or was defeated. The player's side (${sideOf(g).pEn}) won.`
     : g.endReason==='lost' ? `The war ended at T+${minute(g).toFixed(1)}: the player's side (${sideOf(g).pEn}) gave up or was defeated.`
+    : g.endReason==='truce' ? `The war ended at T+${minute(g).toFixed(1)} in a negotiated ceasefire that held for ${TRUCE_MIN * (g.hpm || 1)} game hours. Judge who came out ahead from forces, places held, the balance and the terms on the table (${g.terms || 'none recorded'}).`
     : `The game ended early at T+${minute(g).toFixed(1)}: the track "${g.endReason}" reached 10 (${(s.lose||{})[g.endReason]}).`;
   return `${buildCommon(g)}
 
@@ -1151,6 +1152,7 @@ function applyWarReply(g, sec){
     applyMoves(g, cleanMoves(jsonLines(sec.MOVES)));
     out.arms = applyArms(g, cleanArms(jsonLines(sec.ARMS)), minute(g));
     const t = String(sec.TERMS || '').trim(); if(t) g.terms = /^[-–—]$/.test(t) ? '' : t.slice(0,400);
+    capWill(g);
   }
   return out;
 }
@@ -1282,6 +1284,9 @@ function fillCombat(g){
   if(typeof g.credit !== 'number') g.credit = creditLine(S.pCode);
   if(typeof g.debt !== 'number') g.debt = 0;
   fillUnits(g);
+  if(!g.brk || typeof g.brk !== 'object') g.brk = { th:null, op:null };
+  if(typeof g.wearT !== 'number') g.wearT = Math.floor((g.el || 0) / 60000);
+  if(g.truceT === undefined) g.truceT = null;
   if(typeof g.spent !== 'number') g.spent = g.deals.filter(d => d.st === 'agreed' || d.st === 'delivered').reduce((a,d) => a + d.cost, 0);
 }
 function cleanFront(a){
@@ -1353,9 +1358,34 @@ const dealText = d => `${ACTORS[d.sup][0]} · ${d.item || (CATS[d.key] || STOCKS
 /* combat mode ends when a side gives up or is defeated */
 function warEnd(g){
   const s = scn(g.sid); if(!s.pure || g.phase !== 'run') return null;
+  const m = minute(g), broken = sd => g.brk && g.brk[sd] != null && m - g.brk[sd] >= BREAK_MIN;
   let loser = g.status === 'op_yield' ? 'op' : g.status === 'th_yield' ? 'th' : null;
-  if(!loser) for(const sd of ['op','th']) if(g.bal[sd].mil <= 0 || g.bal[sd].will <= 0 || (g.units && !g.units.some(u => u.side === sd))){ loser = sd; break; }
-  return loser ? (loser === sideOf(g).p ? 'lost' : 'won') : null;
+  if(!loser) for(const sd of ['op','th']) if(g.bal[sd].mil <= 0 || g.bal[sd].will <= 0 || (g.units && !g.units.some(u => u.side === sd)) || broken(sd)){ loser = sd; break; }
+  if(loser) return loser === sideOf(g).p ? 'lost' : 'won';
+  return (g.status === 'ceasefire' && g.truceT != null && m - g.truceT >= TRUCE_MIN) ? 'truce' : null;
+}
+/* page rules that tie will to the fighting, so a war is won, lost or settled before the clock runs out:
+   will cannot outrun the forces behind it, a war wears both sides down, and a side that stays at its breaking point gives up */
+const BREAK = 15, BREAK_MIN = 3, TRUCE_MIN = 3;
+const willCap = (g, sd) => clamp(35 + g.bal[sd].mil, 0, 100);
+function capWill(g){ for(const sd of ['th','op']) g.bal[sd].will = Math.min(g.bal[sd].will, willCap(g, sd)); }
+function lostOwn(g, sd){ const en = sd === 'th' ? 'op' : 'th'; return Object.keys(g.hold || {}).filter(c => { const p = pmeta(g, c); return p && p.own === sd && g.hold[c] === en; }).length; }
+function wear(g, sd){ const en = sd === 'th' ? 'op' : 'th'; return .15 + (g.bal[sd].mil < g.bal[en].mil * .6 ? .5 : 0) + .1 * lostOwn(g, sd); }
+function warWear(g, m){
+  let ch = false;
+  if(g.status !== 'ceasefire') while(g.wearT + 1 <= m){ g.wearT++; for(const sd of ['th','op']) g.bal[sd].will = clamp(g.bal[sd].will - wear(g, sd), 0, 100); ch = true; }
+  else g.wearT = Math.max(g.wearT, Math.floor(m));
+  capWill(g);
+  const hrs = BREAK_MIN * (g.hpm || 1);
+  for(const sd of ['th','op']){
+    const b = g.bal[sd], low = b.mil <= BREAK || b.will <= BREAK;
+    if(low && g.brk[sd] == null){ g.brk[sd] = m; ch = true; g.feed.push({ k:'note', m, body:`${SIDES[sd]}${youTag(sd)}ถึงจุดแตกหัก: กำลังรบหรือเจตจำนงสู้ต่อเหลือ ${BREAK} หรือน้อยกว่า ถ้าไม่ฟื้นเกิน ${BREAK + 5} ภายใน ${hrs} ชั่วโมงในเกม กองบัญชาการของ${SIDES[sd]}จะยอมรับเงื่อนไข` }); cue('miss'); }
+    else if(!low && g.brk[sd] != null && b.mil > BREAK + 5 && b.will > BREAK + 5){ g.brk[sd] = null; ch = true; g.feed.push({ k:'note', m, body:`${SIDES[sd]}${youTag(sd)}พ้นจุดแตกหักแล้ว` }); }
+  }
+  const calm = g.status === 'ceasefire';
+  if(calm && g.truceT == null){ g.truceT = m; ch = true; g.feed.push({ k:'note', m, body:`หยุดยิงมีผล ถ้ายืนได้ ${TRUCE_MIN * (g.hpm || 1)} ชั่วโมงในเกม สงครามจบด้วยการเจรจา ระหว่างนี้หน่วยบนแผนที่หยุดรบ` }); }
+  else if(!calm && g.truceT != null){ g.truceT = null; ch = true; }
+  return ch;
 }
 const clockLimit = g => (g.auto && g.dur < g.cap) ? g.cap : g.dur;
 const CAL_CRISIS = 'CALIBRATION. Changes are small and earned. Most single orders or events move a value by 0 to 3 points. A day of heavy fighting costs the weaker side 2 to 4 mil. Closing every crossing costs the smaller, more dependent economy 1 to 2 econ per game day and the larger one less than 1. Use 5 or more only for a decisive event: a major base or fleet unit lost, a capital under fire, a government falling, a great power changing sides. Over 60 game hours of limited war a value rarely moves by more than 15 to 20 points in total. Neither army nor economy is destroyed in two and a half days.';
@@ -1370,7 +1400,8 @@ ARMS PURCHASES. The player's side (${S.pEn}) has an emergency procurement fund i
 - Sellers decide by interest and law: export licences and end-use conditions; some states do not sell to a party in an active war or to the side seen as the aggressor; a state backing the enemy refuses or stalls; a backer at level 2 or 3 sells fast, gives credit or donates. Equipment the buyer already operates is usable on delivery; unfamiliar systems need training before they count, so deliver them later or in smaller numbers. Supplier pattern in the baseline (SIPRI, 2021–25): Thailand bought mainly from China (49%), the United States (15%) and Israel (9.2%); Indonesia from Italy (40%), the United States (16%) and France (14%). For other buyers use general knowledge.
 - Price: the order of magnitude of publicly reported contract values plus a wartime premium of 20% to 100% for urgency; lower with slower delivery, credit or conditions. Prices are game estimates. A stock purchase of 10 points is a large emergency resupply.
 - Bargaining: the first answer to a request is an offer (st "offer") with price, delivery minute and conditions. The player may accept, counter on price, quantity, delivery or conditions, or walk away. A reasoned counter earns a better offer; a lowball or a threat earns a worse one or a refusal. Only the player's explicit acceptance of a standing offer makes it "agreed". Never mark a deal agreed if it costs more than the fund. Deliveries can be delayed or lost to enemy action: then change the deal's eta or cancel it and say why. The player borrows from its own treasury through the page, up to the credit line in the state block. You add money only as credit or a gift from a state that backs the player's side, as a "fund" line, and you may take money away the same way.
-ENDING THE WAR. The game ends when a side gives up or is defeated. Set STATUS to op_yield or th_yield when that side's command stops fighting and accepts terms: when its mil or will is 15 or lower, when its main forces in the theatre are destroyed or cut off, when its capital or main bases are lost with no backer stepping in, or when it accepts the other side's terms in talks. The enemy does not give up early for the player's convenience and does not fight to the last man either: below will 30 it sends feelers and offers terms. Report its current offer or demand in TERMS. The player may accept the enemy's terms, make a counter-offer, demand surrender, or surrender. A demand without the means to force it stiffens the enemy. Once STATUS is op_yield or th_yield the page ends the game, so set it only when it is final.`;
+ENDING THE WAR. The game ends when a side gives up or is defeated. Set STATUS to op_yield or th_yield when that side's command stops fighting and accepts terms: when its mil or will is 15 or lower, when its main forces in the theatre are destroyed or cut off, when its capital or main bases are lost with no backer stepping in, or when it accepts the other side's terms in talks. The enemy does not give up early for the player's convenience and does not fight to the last man either: below will 30 it sends feelers and offers terms. Report its current offer or demand in TERMS. The player may accept the enemy's terms, make a counter-offer, demand surrender, or surrender. A demand without the means to force it stiffens the enemy. Once STATUS is op_yield or th_yield the page ends the game, so set it only when it is final.
+PAGE RULES ON WILL AND ENDINGS. The page enforces these; keep your numbers consistent with them. A side's will cannot exceed 35 + its mil. Each clock minute of fighting costs each side 0.15 will, 0.5 more if its mil is below 60% of the other side's, and 0.1 more for each of its own places the enemy holds. A side whose mil or will is ${BREAK} or lower is at its breaking point (see BREAKING POINT in the state); if it does not recover above ${BREAK + 5} within ${BREAK_MIN} clock minutes the page ends the war with that side's defeat. Raise will only for a real event (a clear victory, an objective retaken, a patron joining), never to keep a side in the war. Battles the page resolves on the map also move the initiative track. A ceasefire both commands accept is STATUS ceasefire: while it holds the page stops the fighting on the map, and if it holds for ${BREAK_MIN} clock minutes the war ends as a negotiated settlement judged on forces, places held and terms. Set STATUS back to war if either side breaks it.`;
 }
 function supplierList(g){ const out = SUPK.slice(); oppOf(g).actors.forEach(a => { if(!out.includes(a)) out.push(a); }); return out; }
 function warHead(g){
@@ -1443,7 +1474,8 @@ ARMS FUND of the player's side: US$${nf(g.fund)} million available, US$${nf(g.sp
 BORROWED: US$${nf(g.debt)} million of a US$${nf(g.credit)} million emergency credit line. The page handles this borrowing and its cost in econ; do not grant or refuse it.
 DEALS: ${g.deals.length ? g.deals.map(d => `${d.id} ${d.sup} ${d.key} n=${d.n} cost=${d.cost} eta=T+${Number(d.eta).toFixed(1)} st=${d.st}`).join('; ') : 'none'}
 BATTLES SO FAR (player's side): ${g.score.win} won, ${g.score.loss} lost, ${g.score.draw} drawn.${unitState(g)}
-ENEMY TERMS: ${g.terms || '-'}`;
+ENEMY TERMS: ${g.terms || '-'}
+BREAKING POINT: ${['th','op'].map(sd => `${sd} ${g.brk && g.brk[sd] != null ? 'since T+' + g.brk[sd].toFixed(1) + ', gives up at T+' + (g.brk[sd] + BREAK_MIN).toFixed(1) : 'no'}`).join('; ')}. WILL CAP: th ${Math.round(willCap(g,'th'))}, op ${Math.round(willCap(g,'op'))}.${g.truceT != null ? ' CEASEFIRE holding since T+' + g.truceT.toFixed(1) + '; the war ends as negotiated at T+' + (g.truceT + TRUCE_MIN).toFixed(1) + '.' : ''}`;
 }
 
 /* ---------- combat mode map: formations that move, meet, fight and take places ----------
@@ -1564,7 +1596,7 @@ function fightRound(g, code, type, m){
   const a2 = unitsAt(g, code, 'th', type).length, b2 = unitsAt(g, code, 'op', type).length;
   if(!a2 || !b2){
     const win = a2 ? 'th' : b2 ? 'op' : null; delete g.fights[key];
-    if(win){ const mine = win === S.p; g.score[mine ? 'win' : 'loss']++; g.bal[win === 'th' ? 'op' : 'th'].will = clamp(g.bal[win === 'th' ? 'op' : 'th'].will - 2, 0, 100);
+    if(win){ const mine = win === S.p; g.score[mine ? 'win' : 'loss']++; g.stats.lever = clamp(g.stats.lever + (mine ? 1 : -1), 0, 10); g.bal[win === 'th' ? 'op' : 'th'].will = clamp(g.bal[win === 'th' ? 'op' : 'th'].will - 2, 0, 100);
       mapNote(g, m, `${SIDES[win]}ชนะการรบ${UTYPE[type]}ที่${placeName(code)} หลัง ${F.r} รอบ (กำลังที่เสีย: ไทย ${Math.round(F.th)} ${SIDES.op} ${Math.round(F.op)})`, mine ? 'win' : 'loss');
       if(type === 'land' && pmeta(g, code).kind !== 'S'){ if(win === F.h0) g.hold[code] = win; else setHold(g, code, win, m, 'ยึด'); } }
     else { g.score.draw++; mapNote(g, m, `การรบ${UTYPE[type]}ที่${placeName(code)}จบโดยทั้งสองฝ่ายถอย`, 'draw'); }
@@ -1621,7 +1653,8 @@ function simUnits(g, m){
   if(!g.units) return false; let ch = false;
   const stepTo = t => { for(const u of g.units) if(u.to && u.eta <= t){ u.at = u.to; u.to = null; u.from = null; ch = true; if(u.side === sideOf(g).p) mapNote(g, u.eta, `${u.name} ถึง${placeName(u.at)}`, null); } };
   let guard = 0;
-  while(g.simT + SIM_STEP <= m && guard++ < 400){ g.simT += SIM_STEP; stepTo(g.simT); if(simRound(g, g.simT)) ch = true;
+  const quiet = g.status === 'ceasefire';
+  while(g.simT + SIM_STEP <= m && guard++ < 400){ g.simT += SIM_STEP; stepTo(g.simT); if(quiet) continue; if(simRound(g, g.simT)) ch = true;
     if(g.aiT + AI_STEP <= g.simT){ g.aiT = g.simT; if(enemyAI(g, g.simT)) ch = true; } }
   stepTo(m);
   return ch;
@@ -1712,6 +1745,7 @@ function step(g){
   if(scn(g.sid).pure){
     const fl = g.feed.length; if(simUnits(g, m)){ changed = true; if(g.feed.length > fl) cue('dec'); }
     if(deliverArms(g, m)){ changed = true; cue('ok'); }
+    if(warWear(g, m)) changed = true;
     const we = flight ? null : warEnd(g); if(we){ endGame(g, we); return; }
   }
   if(m >= g.dur){
@@ -2355,7 +2389,7 @@ function renderHome(){
         h('li',{text:'รายงานมีระดับความน่าเชื่อถือ บางชิ้นผิดหรือถูกปล่อยมาให้หลงทาง'}),
         h('li',{text:'ส่งได้ทีละคำสั่ง คำสั่งหนึ่งครอบคลุมหลายเรื่องได้'}),
         h('li',{text:'เกมจบเมื่อครบเวลาเท่านั้น ถ้าสงครามปะทุ คุณต้องบัญชาการรบและหาทางยุติเอง ทั้งสองฝ่ายยอมถอย ยอมหยุดยิง ยอมรับเงื่อนไข หรือประกาศยอมแพ้ได้เมื่อสู้ต่อไม่ไหว ในสถานการณ์วิกฤต หลังยอมแพ้เกมยังเดินต่อด้วยเงื่อนไขและผลที่ตามมา'}),
-        h('li',{text:'โหมดรบจบเมื่อฝ่ายใดฝ่ายหนึ่งประกาศยอมแพ้หรือพ่ายแพ้ (กำลังรบหรือเจตจำนงสู้ต่อเหลือศูนย์) ถ้าตั้งให้รบจนรู้ผล เวลาจะต่อเองครั้งละ 20 นาทีจนถึง 180 นาที'}),
+        h('li',{text:'โหมดรบจบเมื่อฝ่ายใดฝ่ายหนึ่งประกาศยอมแพ้หรือพ่ายแพ้ (กำลังรบหรือเจตจำนงสู้ต่อค้างที่ 15 หรือน้อยกว่าเกิน 18 ชั่วโมงในเกม) หรือเมื่อหยุดยิงที่ตกลงกันยืนได้ 18 ชั่วโมงในเกม ถ้าตั้งให้รบจนรู้ผล เวลาจะต่อเองครั้งละ 20 นาทีจนถึง 180 นาที'}),
         h('li',{text:'ออกจากหน้าเกมเมื่อไร นาฬิกาหยุดรอและเกมถูกบันทึก กลับมาเปิดเกมแล้วเวลายังหยุดอยู่จนกว่าคุณจะกดเดินเวลาต่อ'}))));
 
   const {ol, order} = factsList(s, true);
@@ -2746,6 +2780,13 @@ function paintBalance(v){
     rows.push(h('div',{class:'bal-r',role:'img','aria-label':`${DIMS[k]} ไทย ${a} ${SIDES.op} ${b}`},
       h('b',{text:String(a)}), h('div',{class:'bb l'}, h('i',{style:`width:${a}%`})), h('span',{class:'bl',text:DIMS[k]}), h('div',{class:'bb r'}, h('i',{style:`width:${b}%`})), h('b',{text:String(b)}))); });
   const low = ['th','op'].filter(sd => v.bal[sd].will <= 30);
+  if(scn(G.sid).pure){
+    const hpm = G.hpm || 1, now = v.live ? minute(G) : v.m, brk = v.live ? ['th','op'].filter(sd => G.brk && G.brk[sd] != null) : [];
+    rows.push(h('p',{class:'small muted',text: brk.length
+      ? brk.map(sd => `${SIDES[sd]}${youTag(sd)}อยู่ที่จุดแตกหัก ต้องฟื้นเกิน ${BREAK + 5} ภายในอีก ${Math.max(0, Math.ceil((G.brk[sd] + BREAK_MIN - now) * hpm))} ชั่วโมงในเกม มิฉะนั้นยอมแพ้`).join(' · ')
+      : `เต็ม 100 เจตจำนงสู้ต่อสูงได้ไม่เกิน 35 + กำลังรบ และลดลงเองทุกวันที่รบ ฝ่ายที่กำลังรบหรือเจตจำนงเหลือ ${BREAK} หรือน้อยกว่าถึงจุดแตกหัก ถ้าไม่ฟื้นภายใน ${BREAK_MIN * hpm} ชั่วโมงในเกมจะยอมแพ้${low.length ? ' · ' + low.map(sd => SIDES[sd]).join(' และ ') + 'กำลังมองหาทางออก' : ''}`}));
+    ui.balBox.replaceChildren(...rows); return;
+  }
   rows.push(h('p',{class:'small muted',text: low.length ? `${low.map(sd => SIDES[sd]).join(' และ ')}มีเจตจำนงสู้ต่อต่ำ กำลังมองหาทางออก` : 'เต็ม 100 ฝ่ายที่เจตจำนงสู้ต่อเหลือ 30 หรือน้อยกว่าจะเริ่มหาทางออก เหลือ 10 หรือน้อยกว่าอาจประกาศยอมแพ้'}));
   ui.balBox.replaceChildren(...rows);
 }
@@ -2978,6 +3019,7 @@ function endTitle(g, s){
   if(g.endReason === 'time') return [g.auto ? 'ครบเวลาสูงสุด' : 'หมดเวลา', `ครบ ${g.dur} นาที${s.pure ? ' ยังไม่มีฝ่ายใดยอมแพ้' : ''}`, null];
   if(g.endReason === 'won') return ['สงครามยุติ', `${S.eTh}ยอมแพ้หรือพ่ายแพ้ ฝ่ายคุณชนะ`, null];
   if(g.endReason === 'lost') return ['สงครามยุติ', `ฝ่ายคุณ (${S.pTh}) ยอมแพ้หรือพ่ายแพ้`, null];
+  if(g.endReason === 'truce') return ['สงครามยุติ', 'หยุดยิงจากการเจรจามีผล', g.terms ? 'เงื่อนไขล่าสุด: ' + g.terms : null];
   return ['เกมจบก่อนเวลา', `${s.tracks[g.endReason] ? s.tracks[g.endReason].l : g.endReason} ถึง 10`, (s.lose || {})[g.endReason] || null];
 }
 function paintPosture(){
